@@ -1,0 +1,1472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>The Commute Trail</title>
+<style>
+  :root{
+    box-sizing:border-box;
+    padding-top:env(safe-area-inset-top,0px);
+    padding-bottom:env(safe-area-inset-bottom,0px);
+    --accent:#ffd23f;
+    --panel-bg:#0a0a0a; --panel-fg:#f4f4f4;
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0; background:#050505; color:#fff;
+    font-family:'Courier New', monospace;
+    display:flex; flex-direction:column; align-items:center;
+    padding:10px; gap:10px;
+  }
+  #stage{
+    width:100%; max-width:920px;
+    background:#000; border:5px solid #222; border-radius:8px;
+    overflow:hidden;
+    box-shadow:0 0 0 2px #444, 0 10px 30px rgba(0,0,0,.6);
+  }
+  #sceneWrap{
+    width:100%; aspect-ratio:16/9;
+    position:relative; overflow:hidden;
+    background:#000;
+  }
+  #gameCanvas{
+    position:absolute; inset:0; width:100%; height:100%;
+    image-rendering:pixelated; image-rendering:crisp-edges;
+    display:block;
+  }
+  #banner{
+    position:absolute; top:6px; left:6px; right:6px; z-index:5;
+    background:rgba(0,0,0,.65); color:#fff; font-size:clamp(10px,2.3vw,15px);
+    padding:4px 10px; letter-spacing:1px;
+    border:2px solid #fff;
+    display:flex; justify-content:space-between;
+  }
+  #banner span.tag{ color:var(--accent); font-weight:bold; }
+
+  #textbox{
+    border:3px solid #fff; margin:0 8px 0 8px; padding:14px 16px;
+    background:var(--panel-bg); color:var(--panel-fg);
+    font-size:clamp(13px,2.6vw,18px); line-height:1.55;
+    min-height:90px; white-space:pre-line;
+  }
+  #statsbox{
+    border:3px solid #fff; margin:0 8px 8px 8px; padding:10px 16px;
+    background:var(--panel-bg); color:var(--panel-fg);
+    font-size:clamp(11px,2.2vw,15px); line-height:1.6;
+    display:flex; justify-content:space-between; flex-wrap:wrap; gap:10px;
+  }
+  #statsbox .col{min-width:150px;}
+  #statsbox b{color:var(--accent);}
+
+  #controls{
+    display:flex; flex-wrap:wrap; gap:8px; justify-content:center;
+    padding:0 8px 8px 8px;
+  }
+  button{
+    font-family:inherit; font-size:clamp(12px,2.4vw,15px);
+    background:#1a1a1a; color:#fff; border:2px solid #fff;
+    padding:10px 16px; cursor:pointer; border-radius:0;
+    transition:background .15s, transform .1s;
+  }
+  button:hover{background:var(--accent); color:#000;}
+  button:active{transform:translateY(1px);}
+  button:disabled{opacity:.35; cursor:not-allowed;}
+  #title{
+    text-align:center; font-size:clamp(20px,5vw,34px);
+    letter-spacing:2px; color:var(--accent);
+    text-shadow:3px 3px 0 #000;
+    margin:4px 0;
+  }
+  #sub{text-align:center; font-size:clamp(10px,2vw,13px); color:#999; margin-top:-6px;}
+  .hidden{display:none !important;}
+  #resetRow{text-align:center; padding-bottom:6px;}
+  #resetRow button{background:#3a1414; border-color:#c66;}
+</style>
+</head>
+<body>
+
+<div id="title">THE COMMUTE TRAIL</div>
+<div id="sub">Your used sedan will let you down. It's just a question of when.</div>
+
+<div id="stage">
+  <div id="sceneWrap">
+    <canvas id="gameCanvas" width="320" height="180"></canvas>
+    <div id="banner"><span id="bannerCar"></span><span class="tag" id="bannerMiles"></span></div>
+  </div>
+  <div id="textbox">Loading...</div>
+  <div id="statsbox">
+    <div class="col">Date: <b id="statDate">-</b><br>Time: <b id="statTime">-</b></div>
+    <div class="col">Health: <b id="statHealth">-</b><br>Miles: <b id="statMiles">-</b></div>
+    <div class="col">Cash: <b id="statCash">-</b><br>Car: <b id="statCar">-</b></div>
+    <div class="col">Deadline: <b id="statDeadline">-</b></div>
+  </div>
+  <div id="controls"></div>
+  <div id="resetRow"><button id="resetBtn" class="hidden">Start Over</button></div>
+</div>
+
+<script>
+(function(){
+  const CAR_CATALOG = [
+    {name:"1989 Honda Civic",     reliability:0.55, repairMult:0.70, value:500},
+    {name:"1994 Dodge Caravan",   reliability:0.50, repairMult:0.90, value:700},
+    {name:"1998 Buick LeSabre",   reliability:0.65, repairMult:1.00, value:900},
+    {name:"1996 Toyota Camry",    reliability:0.75, repairMult:1.00, value:1100},
+    {name:"2001 Subaru Outback",  reliability:0.85, repairMult:1.30, value:1600},
+    {name:"2003 Ford Taurus",     reliability:0.90, repairMult:1.20, value:1800},
+    {name:"1988 Ford Escort",     reliability:0.48, repairMult:0.60, value:400},
+    {name:"1992 Chevrolet Cavalier", reliability:0.52, repairMult:0.65, value:450},
+    {name:"2002 Chrysler PT Cruiser", reliability:0.63, repairMult:1.05, value:1000},
+    {name:"1997 Jeep Grand Cherokee", reliability:0.60, repairMult:1.15, value:1300},
+    {name:"1993 Peugeot 405",     reliability:0.58, repairMult:0.95, value:800},
+    {name:"1995 Volkswagen Golf", reliability:0.62, repairMult:1.15, value:950},
+    {name:"2000 Saab 9-3",        reliability:0.68, repairMult:1.35, value:1400},
+    {name:"1996 Audi A4",         reliability:0.75, repairMult:1.55, value:1900},
+    {name:"1999 BMW 528i",        reliability:0.72, repairMult:1.60, value:2200},
+    {name:"1990 Volvo 240",       reliability:0.92, repairMult:1.00, value:1200}
+  ];
+  function reliabilityFactor(){ return 1 + (1 - state.reliability); } // ~1.1 (great car) to ~1.5 (junker)
+  function randInt(lo,hi){ return Math.floor(Math.random()*(hi-lo+1))+lo; }
+  function applyInjury(){
+    const loss = randInt(12,28);
+    state.maxEnergy = Math.max(40, (state.maxEnergy||100) - loss);
+    state.energy = Math.min(state.energy, state.maxEnergy);
+    state.injuries = (state.injuries||0) + 1;
+  }
+  const WEATHERS = ["Clear","Overcast","Rainy","Foggy","Scorching","Windy"];
+  let state = {};
+  let currentScene = 'title';
+  let sceneFlags = {};
+
+  const cv = document.getElementById('gameCanvas');
+  const ctx = cv.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  const W = 160, H = 90; // logical grid (kept for layout math)
+  const S = 2; // physical supersampling: canvas is 320x180
+
+  /* ---------- palette ---------- */
+  const PAL = {
+    skyDayTop:'#2f7fd8', skyDayLow:'#6fb8ef',
+    skyDuskTop:'#3a2255', skyDuskMid:'#a1456a', skyDuskLow:'#f0955a',
+    skyNightTop:'#050818', skyNightLow:'#111a3c',
+    mtnBack:'#6577b8', mtnFront:'#4655959'.slice(0,7), snow:'#eef1ff',
+    fieldA:'#cdb24a', fieldB:'#b39638', fieldC:'#9c7f2c',
+    grassA:'#6fae3d', grassB:'#578a2c',
+    dirt:'#8a6a3d', dirtDark:'#6e5230',
+    carBody:'#c7a97c', carBodyDark:'#a5875c', carBodyLight:'#dbc397',
+    window:'#5fa8d8', windowDark:'#3d7ab0',
+    wheel:'#1a1a1a', hub:'#8a8a8a',
+    tailRed:'#c73a3a', headAmber:'#e8b83f',
+    skin:'#d6a06e', skinDark:'#b57e50',
+    shirt:'#e8e2d0', pants:'#3a4d7a', shoe:'#4a3322', hair:'#2a1e14',
+    blood:'#9e1c1c',
+    building:'#7a5b3f', buildingDark:'#5c4530', roof:'#4a2f22',
+    winLit:'#ffd23f', winDark:'#2a2018',
+    road:'#4a4a4a', roadLine:'#e8e8e8',
+    metal:'#8f8f8f', metalDark:'#6a6a6a',
+    sign:'#e8e4da'
+  };
+
+  function px(x,y,w,h,color){ ctx.fillStyle=color; ctx.fillRect(x|0,y|0,w|0,h|0); }
+  function px1(px1x,px1y,color){ ctx.fillStyle=color; ctx.fillRect(px1x, px1y, 0.5, 0.5); } // one physical pixel at S=2
+  function pxCircle(cx,cy,r,color){
+    ctx.fillStyle = color;
+    for(let y=-r;y<=r;y++){
+      const w = Math.round(Math.sqrt(Math.max(0,r*r-y*y)));
+      ctx.fillRect(Math.round(cx-w), Math.round(cy+y), w*2, 1);
+    }
+  }
+  function outlineRect(x,y,w,h,color){
+    ctx.fillStyle = color;
+    ctx.fillRect(x,y,w,1); ctx.fillRect(x,y+h-1,w,1);
+    ctx.fillRect(x,y,1,h); ctx.fillRect(x+w-1,y,1,h);
+  }
+  function dither(x0,y0,w,h,colorA,colorB,density){
+    // scatter fine half-logical speckles for a smoother gradient/texture feel (renders as single physical pixels at S=2)
+    density = density || 0.35;
+    for(let yy=0; yy<h*2; yy++){
+      for(let xx=0; xx<w*2; xx++){
+        const n = ((xx*13 + yy*7) % 100)/100;
+        if(n < density) px1(x0+xx*0.5, y0+yy*0.5, n<density*0.5 ? colorA : colorB);
+      }
+    }
+  }
+
+  function clear(){ ctx.setTransform(1,0,0,1,0,0); ctx.clearRect(0,0,W*S,H*S); ctx.setTransform(S,0,0,S,0,0); }
+
+  /* ---------- sky / ground layers ---------- */
+  function sky(phase){
+    if(phase==='night'){
+      px(0,0,W,50,PAL.skyNightTop);
+      px(0,50,W,12,PAL.skyNightLow);
+      dither(0,46,W,8,PAL.skyNightTop,PAL.skyNightLow,0.5);
+      ctx.fillStyle='#fff';
+      const starPts = [[8,6],[20,14],[35,5],[50,18],[63,8],[78,4],[92,16],[105,7],[118,12],[130,5],[142,15],[152,8],[14,24],[45,26],[70,22],[100,26],[125,24]];
+      starPts.forEach(p=>{ ctx.fillRect(p[0],p[1],1,1); });
+    } else if(phase==='dusk'){
+      px(0,0,W,20,PAL.skyDuskTop);
+      px(0,20,W,20,PAL.skyDuskMid);
+      px(0,40,W,22,PAL.skyDuskLow);
+      dither(0,17,W,6,PAL.skyDuskTop,PAL.skyDuskMid,0.5);
+      dither(0,37,W,6,PAL.skyDuskMid,PAL.skyDuskLow,0.5);
+    } else {
+      px(0,0,W,42,PAL.skyDayTop);
+      px(0,42,W,20,PAL.skyDayLow);
+      dither(0,38,W,8,PAL.skyDayTop,PAL.skyDayLow,0.5);
+    }
+  }
+
+  function sunMoon(phase, pct){
+    const x = 14 + pct*132;
+    const y = 14;
+    if(phase==='night'){
+      pxCircle(x,y,5,'#eef1ff');
+      pxCircle(x-2,y-1,4,PAL.skyNightTop);
+    } else if(phase==='dusk'){
+      pxCircle(x,y+6,7,'#ffb35c');
+      pxCircle(x,y+6,4,'#ffd79a');
+    } else {
+      pxCircle(x,y,7,'#ffe98a');
+      pxCircle(x,y,4,'#fff7c4');
+    }
+  }
+
+  function clouds(phase){
+    if(phase==='night') return;
+    const c = phase==='dusk' ? '#e8a978' : '#ffffff';
+    const shadow = phase==='dusk' ? '#c98a5c' : '#cfe3f2';
+    px(22,11,10,3,shadow); px(26,9,6,3,shadow);
+    px(21,10,10,3,c); px(25,8,6,3,c);
+    px(100,7,12,3,shadow); px(105,5,6,3,shadow);
+    px(99,6,12,3,c); px(104,4,6,3,c);
+  }
+
+  function mountains(phase){
+    const back = phase==='night' ? '#232c55' : phase==='dusk' ? '#513a5f' : PAL.mtnBack;
+    const backLo = phase==='night' ? '#1b234a' : phase==='dusk' ? '#402e4c' : '#5a6aa8';
+    const front = phase==='night' ? '#161c3a' : phase==='dusk' ? '#3a2846' : '#4a5a95';
+    const frontLo = phase==='night' ? '#0f1329' : phase==='dusk' ? '#2c1e36' : '#3a4880';
+    const peaksBack = [[0,44],[14,30],[26,44],[38,34],[50,44],[64,28],[78,44],[92,36],[106,44],[120,26],[134,44],[148,32],[160,44]];
+    drawRidge(peaksBack, 48, back);
+    dither(0,38,W,10,back,backLo,0.3);
+    peaksBack.forEach(p=>{ if(p[1]<34) px(p[0]-3,p[1],6,3,PAL.snow); });
+    const peaksFront = [[0,50],[10,40],[22,50],[34,42],[46,50],[58,38],[70,50],[84,44],[96,50],[110,40],[122,50],[136,44],[150,50],[160,42]];
+    drawRidge(peaksFront, 52, front);
+    dither(0,44,W,10,front,frontLo,0.3);
+  }
+  function drawRidge(pts, baseY, color){
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], baseY);
+    pts.forEach(p=>ctx.lineTo(p[0],p[1]));
+    ctx.lineTo(pts[pts.length-1][0], baseY);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function field(phase, style){
+    const y0 = 52;
+    const dark = phase==='night';
+    if(style==='corn'){
+      for(let row=0; row<10; row++){
+        const yy = y0 + row*4;
+        for(let col=0; col<W/4; col++){
+          const xx = col*4;
+          let c = ((row+col)%2===0) ? PAL.fieldA : PAL.fieldB;
+          if((row+col*3)%7===0) c = PAL.fieldC;
+          if(dark) c = shade(c, -0.55);
+          px(xx,yy,4,4,c);
+          dither(xx,yy,4,4, shade(c,0.25), shade(c,-0.25), 0.25);
+        }
+      }
+    } else {
+      for(let row=0; row<10; row++){
+        const yy = y0 + row*4;
+        for(let col=0; col<W/4; col++){
+          const xx = col*4;
+          let c = ((row+col)%2===0) ? PAL.grassA : PAL.grassB;
+          if(dark) c = shade(c, -0.55);
+          px(xx,yy,4,4,c);
+          // grass blade ticks
+          const bladeC = shade(c, dark?-0.3:0.3);
+          px1(xx+0.5, yy+3.5, bladeC);
+          px1(xx+2, yy+3, bladeC);
+          px1(xx+1.5, yy+0.5, shade(c,-0.35));
+        }
+      }
+    }
+  }
+
+  function shade(hex, amt){
+    const n = parseInt(hex.slice(1),16);
+    let r=(n>>16)&255, g=(n>>8)&255, b=n&255;
+    r = Math.max(0,Math.min(255, r + r*amt));
+    g = Math.max(0,Math.min(255, g + g*amt));
+    b = Math.max(0,Math.min(255, b + b*amt));
+    return '#'+[r,g,b].map(v=>Math.round(v).toString(16).padStart(2,'0')).join('');
+  }
+
+  function road(t){
+    px(0,58,W,10,PAL.dirt);
+    px(0,58,W,2,PAL.dirtDark);
+    // dashes scrolling
+    const off = Math.floor((t/90)%16);
+    for(let x=-16; x<W+16; x+=16){
+      px(x - off, 62, 8, 2, PAL.roadLine);
+    }
+  }
+
+  /* ---------- sprites ---------- */
+  function car(x, y, opts){
+    opts = opts||{};
+    const dim = opts.night ? -0.35 : 0;
+    const body = shade(PAL.carBody, dim);
+    const bodyDark = shade(PAL.carBodyDark, dim);
+    const bodyLight = shade(PAL.carBodyLight, dim);
+    const bodyMid = shade(PAL.carBody, dim-0.12);
+    const win = shade(PAL.window, dim);
+    const winLight = shade('#a8d8f2', dim);
+    // shadow
+    px(x-2, y+18, 34, 2, 'rgba(0,0,0,0.3)');
+    // lower body (3-tone panel)
+    px(x, y+10, 30, 8, body);
+    px(x, y+10, 30, 2, bodyLight);
+    px(x, y+14, 30, 2, bodyMid);
+    px(x, y+16, 30, 2, bodyDark);
+    dither(x,y+11,30,3, bodyLight, body, 0.18);
+    // door seam + handle
+    px(x+15, y+11, 1, 6, bodyDark);
+    px(x+18, y+13, 2, 1, '#2a2318');
+    // cabin
+    px(x+5, y+2, 18, 8, body);
+    px(x+7, y, 14, 3, bodyLight);
+    px(x+7, y+2, 14, 1, bodyMid);
+    // windows w/ specular streak
+    px(x+7, y+3, 6, 5, win);
+    px(x+14, y+3, 8, 5, win);
+    px(x+13, y+3, 1, 5, bodyDark);
+    px(x+8, y+3, 1, 5, winLight);
+    px(x+15, y+3, 1, 4, winLight);
+    // hood open flap (stepped diagonal, no rotation = crisp pixels)
+    if(opts.hoodOpen){
+      px(x, y+10, 8, 2, bodyDark);
+      px(x+1, y+7, 7, 2, body);
+      px(x+2, y+4, 6, 2, bodyMid);
+      px(x+3, y+1, 5, 2, bodyLight);
+      px(x+3, y+1, 5, 1, '#f0e0b8');
+    }
+    // lights
+    px(x-1, y+11, 3, 3, PAL.headAmber);
+    px(x-1, y+11, 3, 1, '#fff3c4');
+    px(x+28, y+11, 3, 3, PAL.tailRed);
+    px(x+28, y+13, 3, 1, '#7a1a1a');
+    // wheels w/ tread ticks
+    px(x+4, y+17, 7, 7, PAL.wheel);
+    px(x+6, y+19, 3, 3, PAL.hub);
+    px1(x+4.5,y+17.5,'#000'); px1(x+9.5,y+17.5,'#000'); px1(x+4.5,y+23,'#000'); px1(x+9.5,y+23,'#000');
+    px(x+21, y+17, 7, 7, PAL.wheel);
+    px(x+23, y+19, 3, 3, PAL.hub);
+    px1(x+21.5,y+17.5,'#000'); px1(x+26.5,y+17.5,'#000'); px1(x+21.5,y+23,'#000'); px1(x+26.5,y+23,'#000');
+    // fine outline for silhouette pop
+    outlineRect(x, y+10, 30, 8, '#241c10');
+    outlineRect(x+5, y+2, 18, 8, '#241c10');
+  }
+
+  function personStand(x,y,opts){
+    opts=opts||{};
+    const shirt = opts.shirt || PAL.shirt;
+    const shirtDark = shade(shirt,-0.3);
+    px(x+1, y+16, 8, 2, 'rgba(0,0,0,.25)');
+    px(x+2, y, 5, 5, PAL.skin); // head
+    px1(x+5.5,y+1.5, PAL.skinDark);
+    px(x+2, y+1, 5, 1, PAL.hair);
+    px(x, y+5, 9, 8, shirt); // torso
+    px(x, y+11, 9, 2, shirtDark);
+    px(x+1, y+13, 3, 6, PAL.pants);
+    px(x+5, y+13, 3, 6, PAL.pants);
+    px(x+1, y+13, 3, 1, shade(PAL.pants,0.2));
+    px(x+5, y+13, 3, 1, shade(PAL.pants,0.2));
+    px(x+1, y+18, 3, 2, PAL.shoe);
+    px(x+5, y+18, 3, 2, PAL.shoe);
+    px(x-2, y+6, 3, 6, opts.armColor||PAL.skinDark);
+    px(x+9, y+6, 3, 6, opts.armColor||PAL.skinDark);
+    outlineRect(x, y+5, 9, 8, '#241c10');
+  }
+
+  function personLying(x,y){
+    px(x, y+9, 30, 3, 'rgba(0,0,0,.25)');
+    px(x, y, 18, 5, PAL.shirt);
+    px(x, y+3, 18, 2, shade(PAL.shirt,-0.25));
+    px(x+16, y-1, 6, 6, PAL.skin);
+    px(x+17, y-1, 5, 2, PAL.hair);
+    px(x-4, y+1, 5, 4, PAL.pants);
+    px(x+2, y+5, 8, 3, PAL.pants);
+    px(x-7, y+2, 4, 3, PAL.shoe);
+    px(x+22, y+2, 3, 2, PAL.blood);
+    px(x+24, y+3, 2, 1, PAL.blood);
+  }
+
+  function smoke(t,x,y){
+    for(let i=0;i<3;i++){
+      const phase = ((t/500)+i*0.33)%1;
+      const yy = y - phase*18;
+      const alpha = 1-phase;
+      const r = 2+phase*4;
+      ctx.globalAlpha = alpha*0.7;
+      pxCircle(x+i*3, yy, r, '#cfcfcf');
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function sparkPlugFly(t,x,y){
+    const p = (t/40)%40;
+    px(x+p, y-p*0.6, 3, 2, '#c9c9c9');
+    px(x+p-4, y-p*0.6+2, 2, 1, '#888');
+    px(x+p-8, y-p*0.6+4, 2, 1, '#888');
+  }
+
+  function building(x,y,w,h,opts){
+    opts=opts||{};
+    px(x,y,w,h, opts.color||PAL.building);
+    px(x,y,w,2, opts.roof||PAL.roof);
+    const winC = opts.lit ? PAL.winLit : PAL.winDark;
+    for(let wx=x+3; wx<x+w-4; wx+=7){
+      px(wx, y+6, 4, 5, winC);
+    }
+  }
+
+  /* ---------- scenes ---------- */
+  function scenePhase(){
+    if(!state || state.dead || state.arrived || state.failed) return 'fixed';
+    return isNight(state.hour) ? 'night' : (isDusk(state.hour) ? 'dusk' : 'day');
+  }
+
+  function drawRoad(t){
+    const phase = scenePhase();
+    const hh = ((state.hour%24)+24)%24;
+    const pct = hh/24;
+    clear();
+    sky(phase);
+    sunMoon(phase,pct);
+    clouds(phase);
+    mountains(phase);
+    field(phase,'grass');
+    road(t);
+    car(58,42,{night:phase==='night'});
+  }
+
+  function gravelGround(y0,h,dark){
+    for(let yy=y0; yy<y0+h; yy+=2){
+      for(let xx=0; xx<W; xx+=2){
+        const seed = (xx*7 + yy*13) % 11;
+        let c = seed<4 ? '#8a8a82' : seed<7 ? '#77776f' : '#66665f';
+        if(dark) c = shade(c,-0.4);
+        px(xx,yy,2,2,c);
+      }
+    }
+  }
+  function cactus(x,y){
+    px(x,y,3,14,'#4a7a3f');
+    px(x-4,y+4,4,3,'#4a7a3f');
+    px(x-4,y+1,3,6,'#4a7a3f');
+    px(x+3,y+7,4,3,'#4a7a3f');
+    px(x+5,y+4,3,6,'#4a7a3f');
+  }
+  function tree(x,y,dark){
+    let trunk = dark?'#3a2c1c':'#5c4327';
+    let leaf = dark?'#2c4a22':'#3f7a2c';
+    px(x+3,y+12,3,10,trunk);
+    px(x-3,y,12,14,leaf);
+    px(x-1,y-5,8,8,leaf);
+  }
+  function rainStreaks(t){
+    ctx.strokeStyle = 'rgba(200,220,255,0.55)';
+    ctx.lineWidth = 1;
+    for(let i=0;i<20;i++){
+      const seed = (i*37 + Math.floor(t/40)) % 90;
+      const x = (i*13 + Math.floor(t/25)) % (W+20) - 10;
+      ctx.beginPath(); ctx.moveTo(x, seed); ctx.lineTo(x-3, seed+8); ctx.stroke();
+    }
+  }
+  function bridgeRail(dark){
+    const c = dark? '#555':'#8a8a8a';
+    px(0,44,W,3,c);
+    for(let x=0;x<W;x+=10){ px(x,44,2,10,c); }
+    px(0,54,W,3,shade(c,-0.3));
+  }
+
+  function drawBreakdown(t,night,location){
+    clear();
+    const phase = night?'night':'day';
+    location = location || 'field';
+
+    if(location==='desert'){
+      sky(phase); sunMoon(phase, night?0.8:0.45);
+      px(0,44,W,46, night? shade('#c9a870',-0.55) : '#d8bd82');
+      px(0,44,W,3, night? shade('#b89860',-0.55) : '#c2a670');
+      cactus(20,50); cactus(130,52);
+      road(t);
+    } else if(location==='forest'){
+      sky(phase); sunMoon(phase, night?0.8:0.4); clouds(phase);
+      field(phase,'grass');
+      tree(14,30,night); tree(140,26,night); tree(30,22,night); tree(122,34,night);
+      road(t);
+    } else if(location==='bridge'){
+      sky(phase); sunMoon(phase, night?0.8:0.4);
+      px(0,44,W,46, night? '#233047' : '#4a5f7a');
+      bridgeRail(night);
+      px(0,60,W,30, night? shade('#2a4560',-0.3) : '#3a6a90');
+    } else if(location==='rain'){
+      sky('night'===phase?'night':'dusk'); sunMoon(phase,0.5);
+      mountains(phase);
+      field(phase,'grass'); road(t);
+      rainStreaks(t);
+    } else {
+      sky(phase); sunMoon(phase, night?0.8:0.4); clouds(phase); mountains(phase);
+      field(phase,'grass'); road(t);
+    }
+
+    smoke(t, 76, 40);
+    car(48,42,{hoodOpen:true, night:night});
+    personStand(100,44,{});
+    if(location==='rain') rainStreaks(t+13);
+  }
+
+  function drawDeath(t){
+    clear();
+    sky('day'); sunMoon('day',0.4); clouds('day'); mountains('day');
+    field('day','corn');
+    car(10,38,{hoodOpen:true});
+    sparkPlugFly(t, 34, 30);
+    personLying(72,60);
+  }
+
+  function drawRepair(t, phaseArg){
+    clear();
+    const phase = phaseArg || 'day';
+    sky(phase); sunMoon(phase, phase==='dusk'?0.75:0.45); clouds(phase); mountains(phase);
+    // garage shed
+    building(6,14,58,34,{color:'#7a5b3f', roof:'#4a2f22'});
+    px(14,30,18,18,PAL.winDark);
+    px(38,24,20,24,'#2a2018'); // bay door opening (dark)
+    px(40,26,16,20, phase==='night' ? PAL.winLit : '#1a1410');
+    // sign
+    px(10,6,44,8,'#e8e4da');
+    pxText('GARAGE',13,8,'#000');
+    // gravel lot ground
+    gravelGround(52, 38, phase==='night');
+    // oil drum
+    px(140,42,10,16,'#3a3a3a');
+    px(140,42,10,3,'#c73a3a');
+    // tow truck parked in back
+    px(96,30,28,14,'#8a2a2a');
+    px(100,22,14,10,'#8a2a2a');
+    px(103,24,8,6,PAL.window);
+    px(98,44,6,6,PAL.wheel); px(116,44,6,6,PAL.wheel);
+    // hero car up on the lift/blocks getting worked on
+    car(50,44,{hoodOpen:true, night: phase==='night'});
+    px(56,60,4,4,'#3a3a3a'); px(76,60,4,4,'#3a3a3a'); // jack stands under car
+    personStand(38,46,{shirt:'#5a6b8a', armColor:'#3a4a63'});
+  }
+
+  function drawMotel(t,night){
+    clear();
+    const phase = night?'night':'dusk';
+    sky(phase); sunMoon(phase,0.8); mountains(phase);
+    field(phase,'grass');
+    building(16,28,76,30,{color:'#5a4636', roof:'#3d2f24', lit:night});
+    px(46,50,12,10, night?'#ffd23f':'#2a2018');
+    // motel sign
+    px(100,20,5,28,PAL.metalDark);
+    const flicker = night ? (Math.floor(t/400)%2===0) : true;
+    if(flicker) px(76,14,40,10,'#c9283f');
+    ctx.fillStyle = '#fff';
+    if(flicker){ pxText('MOTEL', 80, 21, '#fff'); }
+    car(108,50,{night:night});
+  }
+
+  function drawWork(t){
+    clear();
+    sky('day'); sunMoon('day',0.5); clouds('day'); mountains('day');
+    field('day','corn');
+    // barn
+    px(10,26,46,26,'#a13c2f');
+    ctx.beginPath();
+    ctx.moveTo(8,26); ctx.lineTo(33,10); ctx.lineTo(58,26); ctx.closePath();
+    ctx.fillStyle='#5f2a20'; ctx.fill();
+    px(28,40,16,12,'#3a1f16');
+    personStand(90,48,{shirt:'#7a9c4f', armColor:'#5a7a3a'});
+    personStand(70,50,{shirt:'#c98a3f', armColor:'#a56a2a'});
+  }
+
+  function drawArrive(t){
+    clear();
+    sky('dusk'); sunMoon('dusk',0.55);
+    building(6,20,18,40,{color:'#3a2a4a',roof:'#241a30',lit:true});
+    building(26,10,20,50,{color:'#4a3660',roof:'#2e2140',lit:true});
+    building(48,24,14,36,{color:'#3a2a4a',roof:'#241a30',lit:true});
+    building(120,16,18,44,{color:'#4a3660',roof:'#2e2140',lit:true});
+    building(140,24,16,36,{color:'#3a2a4a',roof:'#241a30',lit:true});
+    field('dusk','grass'); road(t);
+    px(58,12,48,10,'#fff');
+    pxText('WELCOME', 61, 19, '#000');
+    car(70,44,{});
+  }
+
+  function drawFail(t){
+    clear();
+    sky('dusk'); sunMoon('dusk',0.9); mountains('dusk');
+    field('dusk','grass'); road(t);
+    px(118,26,3,30,PAL.metalDark);
+    px(108,26,22,18,'#c9d3e0');
+    px(110,29,18,12,'#6c88b0');
+    car(20,42,{});
+    px(40,58,9,6,'#fff');
+    px(41,60,7,1,'#c9283f');
+  }
+
+  function drawTitle(t){
+    clear();
+    sky('day'); sunMoon('day',0.35); clouds('day'); mountains('day');
+    field('day','grass'); road(t);
+    car(60,40,{});
+  }
+
+  function pxText(str,x,y,color){
+    // tiny 3x5 blocky font using rects (very small subset, uppercase + common letters)
+    const glyphs = {
+      A:["010","101","111","101","101"],
+      B:["110","101","110","101","110"],
+      C:["011","100","100","100","011"],
+      E:["111","100","111","100","111"],
+      L:["100","100","100","100","111"],
+      M:["101","111","111","101","101"],
+      O:["010","101","101","101","010"],
+      T:["111","010","010","010","010"],
+      W:["101","101","111","111","101"],
+      ' ':["000","000","000","000","000"]
+    };
+    ctx.fillStyle = color;
+    let cx = x;
+    for(const ch of str.toUpperCase()){
+      const g = glyphs[ch] || glyphs[' '];
+      for(let ry=0; ry<5; ry++){
+        for(let rx=0; rx<3; rx++){
+          if(g[ry][rx]==='1') ctx.fillRect(cx+rx, y+ry, 1, 1);
+        }
+      }
+      cx += 4;
+    }
+  }
+
+  function draw(t){
+    switch(currentScene){
+      case 'road': drawRoad(t); break;
+      case 'breakdown': drawBreakdown(t, sceneFlags.night, sceneFlags.location); break;
+      case 'death': drawDeath(t); break;
+      case 'repair': drawRepair(t, sceneFlags.phase); break;
+      case 'motel': drawMotel(t, sceneFlags.night); break;
+      case 'work': drawWork(t); break;
+      case 'arrive': drawArrive(t); break;
+      case 'fail': drawFail(t); break;
+      default: drawTitle(t);
+    }
+  }
+
+  function loop(t){
+    draw(t);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+
+  function setScene(name, flags){
+    currentScene = name;
+    sceneFlags = flags || {};
+    document.getElementById('bannerCar').textContent = state.car ? state.car.toUpperCase() : '';
+    document.getElementById('bannerMiles').textContent = state.miles!=null ? state.miles+' MI' : '';
+  }
+
+  /* ---------------- time helpers ---------------- */
+  function pick(arr){ return arr[Math.floor(Math.random()*arr.length)]; }
+  function fmtDate(d){
+    const months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    return months[d.getMonth()]+" "+d.getDate()+", "+d.getFullYear();
+  }
+  function fmtHour(h){
+    const hh = Math.floor(((h%24)+24)%24);
+    const ampm = hh>=12 ? "PM" : "AM";
+    let disp = hh%12; if(disp===0) disp=12;
+    return disp+":00 "+ampm;
+  }
+  function isNight(h){ const hh=((h%24)+24)%24; return hh>=20 || hh<6; }
+  function isDusk(h){ const hh=((h%24)+24)%24; return (hh>=18&&hh<20)||(hh>=6&&hh<7); }
+
+  function healthLabel(e){
+    if(e>=75) return "Great";
+    if(e>=50) return "Tired";
+    if(e>=25) return "Exhausted";
+    return "Dangerously Fatigued";
+  }
+
+  function updateStats(){
+    document.getElementById('statDate').textContent = fmtDate(state.date) + " (Day "+state.day+")";
+    document.getElementById('statTime').textContent = fmtHour(state.hour) + (isNight(state.hour) ? " \u{1F319}" : "");
+    document.getElementById('statHealth').textContent = state.dead ? "Dead" : healthLabel(state.energy) + " (" + Math.round(state.energy) + "%)" + (state.injuries>0 ? " [old injury]" : "");
+    document.getElementById('statMiles').textContent = state.miles + " / " + state.totalMiles;
+    document.getElementById('statCash').textContent = "$" + state.cash;
+    document.getElementById('statCar').textContent = state.carHealth > 0 ? state.carHealth + "%" : "Broken";
+    const daysLeft = state.deadlineDay - state.day;
+    document.getElementById('statDeadline').textContent = state.arrived ? "Met" : (daysLeft>=0 ? "Day "+state.deadlineDay+" ("+daysLeft+" left)" : "MISSED");
+  }
+
+  function render(msg){
+    document.getElementById('textbox').textContent = msg;
+    updateStats();
+  }
+
+  function showControls(list){
+    const c = document.getElementById('controls');
+    c.innerHTML = "";
+    list.forEach(item=>{
+      const b = document.createElement('button');
+      b.textContent = item.label;
+      b.onclick = item.action;
+      c.appendChild(b);
+    });
+    document.getElementById('resetBtn').classList.toggle('hidden', !state.dead && !state.arrived && !state.failed);
+  }
+
+  /* ---------------- game flow ---------------- */
+  function newGame(){
+    const start = new Date(1996,4,1);
+    const startCar = pick(CAR_CATALOG);
+    state = {
+      day:1, hour:8, date:start,
+      car: startCar.name, reliability: startCar.reliability, repairMult: startCar.repairMult, carValue: startCar.value,
+      health:"Good", energy:100, maxEnergy:100, injuries:0, neglected:0,
+      miles:0, totalMiles:2000, cash:250, carHealth:100,
+      weather: pick(WEATHERS),
+      dead:false, arrived:false, failed:false, totaled:false,
+      deadlineDay:18
+    };
+    setScene('title');
+    const relTier = state.reliability >= 0.85 ? "It's newer and better-built than most \u2014 don't expect it to make life easy, though." :
+      state.reliability >= 0.7 ? "It's decent enough, for something this old." :
+      "It's cheap, it's tired, and it will remind you of that constantly.";
+    render("Welcome, traveler. Your ride is a " + state.car + ". " + relTier + " You've got " + state.deadlineDay + " days to cover 2,000 miles \u2014 or the job on the other end won't wait for you.");
+    showControls([{label:"Depart", action:()=>{ setScene('road'); drive_intro(); }}]);
+  }
+
+  function drive_intro(){
+    render("You turn the key. The engine catches on the second try. Good enough.");
+    showControls([{label:"Keep Driving", action:drive}, {label:"Find Day Work (+cash)", action:findWork}]);
+  }
+
+  function advanceHours(h){
+    const wasNight = isNight(state.hour);
+    state.hour += h;
+    state.date = new Date(state.date.getTime() + h*3600000);
+    while(state.hour >= 24){ state.hour -= 24; state.day++; }
+    const drainRate = wasNight ? 2.6 : 1.6;
+    state.energy = Math.max(0, state.energy - h*drainRate);
+  }
+
+  function checkDeadline(){
+    if(!state.arrived && !state.dead && !state.failed && state.day > state.deadlineDay){
+      state.failed = true;
+      setScene('fail');
+      render("Day " + state.day + " dawns and the deadline has come and gone. Somewhere up the road, the job you were driving toward has been given to someone who owns a more reliable car.\nYou have run out of time.");
+      showControls([]);
+      document.getElementById('resetBtn').classList.remove('hidden');
+      return true;
+    }
+    return false;
+  }
+
+  function finishDeath(msg){
+    state.dead = true; state.health = "Dead";
+    setScene('death');
+    render(msg);
+    showControls([]);
+    document.getElementById('resetBtn').classList.remove('hidden');
+  }
+
+  function arrive(){
+    state.arrived = true;
+    setScene('arrive');
+    render("After " + state.day + " days on the road, you finally roll into town, right on the deadline's heels. The " + state.car + " groans in relief, or possibly just because it's about to fall apart anyway. You made it.");
+    showControls([]);
+    document.getElementById('resetBtn').classList.remove('hidden');
+  }
+
+  function drive(){
+    if(state.dead || state.arrived || state.failed) return;
+    if(state.energy <= 8){
+      render("Your eyes keep losing focus on the white line. You pull over before you do something you can't take back \u2014 you need rest, coffee, or food before you're driving again.");
+      showControls(fatigueOptions());
+      return;
+    }
+    const night = isNight(state.hour);
+    const hoursSpent = Math.floor(Math.random()*3)+3;
+    advanceHours(hoursSpent);
+    state.weather = pick(WEATHERS);
+    setScene('road');
+    if(checkDeadline()) return;
+
+    const roll = Math.random();
+    const relFactor = reliabilityFactor();
+    const fatigueFactor = 1 + Math.max(0, (45 - state.energy) / 45) * 1.1; // kicks in hard under ~45 energy
+    const neglectFactor = 1 + Math.min(0.6, (state.neglected||0) * 0.15); // driving on ignored problems compounds risk
+    const fatalChance = (night ? 0.035 : 0.018) * relFactor * fatigueFactor * neglectFactor;
+    const breakdownChance = ((night ? 0.20 : 0.14) * relFactor * neglectFactor) + fatalChance;
+
+    if(roll < fatalChance){
+      const deathsDay = [
+        "checking the oil, the dipstick tube fractures and sprays scalding fluid across your face.\nYou have died.",
+        "changing a tire on the shoulder, a passing truck clips your jack.\nYou have died.",
+        "working on the " + state.car + ", a spark plug shoots out of the engine\nand hits you in the head.\nYou have died.",
+        "jump-starting the battery, you cross the cables and it detonates in your hands.\nYou have died.",
+        "trying to beat a failing crossing gate, you do not beat the train.\nYou have died.",
+        "reaching for a dropped french fry, you swerve into a ditch and roll the car.\nYou have died.",
+        "a rogue tumbleweed the size of a couch smashes through the windshield.\nYou have died.",
+        "a soda can rolls under the brake pedal at the worst possible moment.\nYou have died.",
+        "a flock of geese crossing the highway proves less avoidable than expected.\nYou have died.",
+        "you sneeze at 70 miles an hour with your eyes closed a half-second too long.\nYou have died.",
+        "a rogue shopping cart in a parking lot turns out to be surprisingly lethal.\nYou have died.",
+        "you attempt to parallel park on a hill without the handbrake.\nYou have died.",
+        "a wasp gets into the car through the vents and you lose all sense of priorities.\nYou have died.",
+        "you try to eat a bowl of cereal while driving, and the bowl wins.\nYou have died.",
+        "a runaway grocery cart train crosses four lanes of traffic directly into your path.\nYou have died.",
+        "you attempt to merge while reading a billboard and neither goes well.\nYou have died.",
+        "a low-flying crop duster mistakes the highway for a runway, and you for an obstacle.\nYou have died.",
+        "you bend down to grab a dropped phone and the car has other plans.\nYou have died.",
+        "a badly secured mattress falls off a truck ahead of you at highway speed.\nYou have died.",
+        "you try to change the radio station, the AUX cord, and lanes, all at once.\nYou have died."
+      ];
+      const deathsNight = [
+        "driving exhausted after dark, you drift onto the shoulder and into a guardrail.\nYou have died.",
+        "a deer steps into the headlights on a dark stretch of highway, and you swerve into a ditch.\nYou have died.",
+        "fixing a flat on the shoulder in the dark, a passing truck doesn't see you in time.\nYou have died.",
+        "working on the " + state.car + " by flashlight, a spark plug shoots out of the engine\nand hits you in the head.\nYou have died.",
+        "you doze off for one second at a red light and roll into an intersection.\nYou have died.",
+        "a raccoon the size of a toddler darts out and you overcorrect into a ditch.\nYou have died.",
+        "you mistake the gas station's closed sign glow for a stoplight and it does not end well.\nYou have died.",
+        "an energy drink and pure denial are not, in fact, a substitute for sleep.\nYou have died.",
+        "you nod off counting mile markers and wake up somewhere much worse.\nYou have died.",
+        "a moose the size of a small building steps out of the treeline without warning.\nYou have died.",
+        "you swerve to avoid a shadow that turns out to be, in fact, a shadow.\nYou have died.",
+        "a wall of highway fog swallows the road whole and you find the ditch instead.\nYou have died.",
+        "you reach for the last of the coffee and drift clean across the centerline.\nYou have died.",
+        "a blown-out semi tire carcass appears in your lane with zero warning.\nYou have died.",
+        "you mistake your own reflection in the window for someone standing in the road.\nYou have died.",
+        "the hypnotic blink of a distant radio tower light lulls you right off the shoulder.\nYou have died."
+      ];
+      finishDeath(pick(night ? deathsNight : deathsDay));
+      return;
+    }
+
+    if(roll < breakdownChance){
+      handleBreakdown(night);
+      return;
+    }
+
+    const miles = Math.floor(Math.random()*60)+40;
+    state.miles = Math.min(state.totalMiles, state.miles + miles);
+    const flavorDay = [
+      "The road hums along beneath you. Nothing eventful happens, which feels suspicious.",
+      "You pass a lot of cows. The " + state.car + " seems fine. For now.",
+      "Cruise control engaged. You allow yourself a moment of peace.",
+      "A gas station hot dog sustains you through the afternoon.",
+      "You make good time and even find a decent radio station.",
+      "A hawk circles overhead for a while, apparently unimpressed by your pace.",
+      "You count license plates from other states to pass the time. It's not a lot of fun.",
+      "The fields roll by in an endless golden blur.",
+      "You catch yourself singing along to a jingle you didn't know you remembered.",
+      "A convoy of motorcycles roars past, and for a moment the road feels alive.",
+      "You stop briefly to admire a genuinely enormous roadside attraction shaped like a chicken.",
+      "The AC finally decides to cooperate, and you consider this a personal victory.",
+      "Someone in a minivan waves as they pass. You wave back, unsure why.",
+      "A billboard advertises a diner 400 miles away. You make a mental note you'll forget.",
+      "The smell of fresh-cut hay drifts in through the cracked window.",
+      "You find a coin on the floor mat and decide it's good luck.",
+      "A crop duster buzzes low over a nearby field, putting on a show.",
+      "The highway stretches out dead straight for what feels like forever.",
+      "You pass a sign warning of livestock crossing and see absolutely no livestock.",
+      "Somebody's lost dog trots along the shoulder, seemingly unbothered by traffic.",
+      "You debate the merits of the last gas station's coffee for entirely too long.",
+      "A tumbleweed crosses the road ahead, and you feel like you're in a movie.",
+      "The odometer clicks over a nice round number and you feel oddly proud.",
+      "You spot a hitchhiker but decide against it. Common sense, mostly.",
+      "The clouds form a shape that's definitely a dog. Or a boat. Hard to tell.",
+      "A family of geese refuses to leave the road until fully ready.",
+      "You practice your road-trip harmonica. It does not go well.",
+      "The engine settles into a steady, reassuring rhythm.",
+      "A trucker gives you the friendly headlight flash for merging politely.",
+      "You pass three churches, two gas stations, and one extremely confident scarecrow.",
+      "The scenery shifts from farmland to rolling hills without you quite noticing.",
+      "You eat a granola bar that's been in the glovebox since before this trip started."
+    ];
+    const flavorNight = [
+      "The headlights cut a lonely tunnel through the dark. Your eyelids feel heavy.",
+      "The radio is mostly static this far out. You keep driving anyway.",
+      "Every shape on the roadside looks like a deer until it isn't.",
+      "The dashboard glow is the only light for miles.",
+      "A distant truck stop sign glows like a lighthouse in the dark.",
+      "You count mile markers just to have something to focus on.",
+      "The stars are almost too many to look at out here.",
+      "A lone set of taillights ahead keeps you company for a while, then turns off.",
+      "You roll the window down for a minute just to stay alert.",
+      "The moon hangs low and orange over the horizon.",
+      "Something rustles in the ditch as you pass. You decide not to investigate.",
+      "You hum along to a song only you can hear over the engine noise.",
+      "A late-night trucker convoy passes in a wall of noise and light.",
+      "The road noise becomes hypnotic in a way that isn't entirely safe.",
+      "You pass a closed diner, neon sign still flickering out of habit.",
+      "An owl watches you from a fence post with real judgment in its eyes.",
+      "The temperature drops and you crack the heater on for the first time all trip.",
+      "A distant storm flickers silently on the horizon, too far off to worry about.",
+      "You catch your own reflection in the window and don't recognize how tired you look.",
+      "The white lines blur together the longer you stare at them.",
+      "A gas station attendant gives you a concerned look as you pay for coffee.",
+      "You pass a rest stop full of sleeping cars and wish you were one of them.",
+      "The engine hum is the only sound for what feels like hours.",
+      "Somewhere out in the dark, coyotes are having an opinion about something."
+    ];
+    render(pick(night ? flavorNight : flavorDay) + " You travel " + miles + " miles.");
+    progressOrDrive();
+  }
+
+  function fatigueOptions(){
+    const btns = [];
+    btns.push({label: isNight(state.hour) ? "Pull Over for the Night" : "Stop Early & Rest", action:rest});
+    if(state.cash >= 6) btns.push({label:"Grab coffee (+energy, -$6)", action:buyCoffee});
+    if(state.cash >= 12) btns.push({label:"Stop for a real meal (+energy, -$12)", action:buyFood});
+    return btns;
+  }
+
+  function buyCoffee(){
+    if(state.cash < 6){ render("You're out of cash even for coffee."); showControls(fatigueOptions()); return; }
+    state.cash -= 6;
+    advanceHours(0.4);
+    state.energy = Math.min(state.maxEnergy, state.energy + 18);
+    render("Gas station coffee, burnt and lukewarm, in a cup that says WORLD'S OKAYEST TRUCKER. It helps, a little. -$6.");
+    if(checkDeadline()) return;
+    if(state.energy <= 15){
+      showControls(fatigueOptions());
+    } else {
+      setScene('road');
+      progressOrDrive();
+    }
+  }
+
+  function buyFood(){
+    if(state.cash < 12){ render("You can't afford a real meal right now."); showControls(fatigueOptions()); return; }
+    state.cash -= 12;
+    advanceHours(1);
+    state.energy = Math.min(state.maxEnergy, state.energy + 32);
+    render("A diner plate of eggs, hash browns, and bottomless coffee refills. You feel almost human again. -$12.");
+    if(checkDeadline()) return;
+    if(state.energy <= 15){
+      showControls(fatigueOptions());
+    } else {
+      setScene('road');
+      progressOrDrive();
+    }
+  }
+
+  function progressOrDrive(){
+    if(state.miles >= state.totalMiles){ arrive(); return; }
+    if(checkDeadline()) return;
+    if(state.energy <= 20){
+      render(document.getElementById('textbox').textContent + " You're running on fumes yourself \u2014 you should rest or get some fuel in you before pushing on.");
+      showControls(fatigueOptions());
+      return;
+    }
+    const btns = [{label:"Keep Driving", action:drive}];
+    btns.push({label: isNight(state.hour) ? "Pull Over for the Night" : "Stop Early & Rest", action:rest});
+    if(state.cash >= 6) btns.push({label:"Grab coffee (+energy, -$6)", action:buyCoffee});
+    if(state.cash >= 12) btns.push({label:"Stop for a real meal (+energy, -$12)", action:buyFood});
+    btns.push({label:"Find Day Work (+cash)", action:findWork});
+    if(state.cash < 0) btns.push({label:"Sell some stuff for gas money", action:sellStuff});
+    showControls(btns);
+  }
+
+  function sellStuff(){
+    if(state.dead || state.arrived || state.failed) return;
+    const amt = randInt(15,35);
+    state.cash += amt;
+    advanceHours(0.5);
+    render("You sell a box of odds and ends \u2014 tools, a spare radio, whatever wasn't nailed down \u2014 to a guy at a rest stop for $" + amt + ". You're still in the hole, but less deep.");
+    if(checkDeadline()) return;
+    progressOrDrive();
+  }
+
+  function rest(){
+    if(state.dead || state.arrived || state.failed) return;
+    const night = isNight(state.hour);
+    setScene('motel', {night:night});
+    let hoursToSleep = night ? (30 - state.hour) : (24 - state.hour + 6);
+    if(hoursToSleep <= 0) hoursToSleep += 24;
+    advanceHours(hoursToSleep);
+    state.carHealth = Math.min(100, state.carHealth + 15);
+    state.energy = state.maxEnergy;
+    const cost = 15;
+    state.cash -= cost;
+    const lines = night ? [
+      "You pull into a motel lot lit by a flickering vacancy sign and sleep like the dead.",
+      "You park at a rest area, lock the doors, and try to ignore every sound outside.",
+      "A cheap roadside motel with questionable stains on the ceiling, but a bed's a bed."
+    ] : [
+      "You call it early and check into a motel to let the car \u2014 and you \u2014 cool down.",
+      "You nap through the afternoon at a rest stop, windows cracked."
+    ];
+    render(pick(lines) + " -$"+cost+". You wake up fully rested and the car's in better shape.");
+
+    // very slim chance of getting robbed overnight
+    if(Math.random() < 0.02 && state.cash > 0){
+      const stolen = Math.min(state.cash, randInt(20, 60));
+      state.cash -= stolen;
+      const robberyLines = [
+        "You wake up to find your window jimmied open and $" + stolen + " gone from your bag. Whoever it was left the radio, at least.",
+        "Someone went through the car while you slept. $" + stolen + " missing, and a very violated feeling to go with it.",
+        "You come out to find the glovebox hanging open and $" + stolen + " lighter than you left it."
+      ];
+      render(document.getElementById('textbox').textContent + "\n\n" + pick(robberyLines));
+    }
+
+    if(checkDeadline()) return;
+    setScene('road');
+    showControls([{label:"Keep Driving", action:drive}, {label:"Find Day Work (+cash)", action:findWork}]);
+  }
+
+  function findWork(){
+    if(state.dead || state.arrived || state.failed) return;
+    if(isNight(state.hour)){
+      render("Nothing's hiring at this hour. Best to wait for daylight.");
+      showControls([{label:"Keep Driving", action:drive}, {label:"Pull Over for the Night", action:rest}]);
+      return;
+    }
+    if(state.energy <= 15){
+      render("You're too wiped out to make it through a shift. Rest up first.");
+      showControls(fatigueOptions());
+      return;
+    }
+    setScene('work');
+    const hoursSpent = (Math.floor(Math.random()*3)+3) + (Math.floor(Math.random()*3)+3);
+    advanceHours(hoursSpent);
+    const jobs = [
+      {desc:"You unload a truck at a farm stand for a few hours.", pay:[20,45]},
+      {desc:"You wash dishes at a roadside diner for cash under the table.", pay:[15,35]},
+      {desc:"You help a rancher mend fencing for the afternoon.", pay:[25,55]},
+      {desc:"You pick up a shift bussing tables at a truck stop.", pay:[10,30]},
+      {desc:"You help a stranger load a moving truck for gas money.", pay:[15,40]}
+    ];
+    const job = pick(jobs);
+    const pay = Math.floor(Math.random()*(job.pay[1]-job.pay[0]+1)) + job.pay[0];
+    state.cash += pay;
+    render(job.desc + " +$" + pay + ". It ate most of the day.");
+    if(checkDeadline()) return;
+    setScene('road');
+    progressOrDrive();
+  }
+
+  const BREAKDOWN_LOCATIONS = {
+    field: {
+      name:"open field",
+      day:[
+        {text:"the timing belt snaps", hazard:{deathChance:0.15, injureChance:0.25,
+          deathLine:"the belt whips loose as you reach in and catches you across the throat.\nYou have died.",
+          injureLine:"the belt snaps back and gashes your arm badly. It'll heal, slowly."}},
+        {text:"the radiator starts hissing steam", hazard:{deathChance:0.10, injureChance:0.30,
+          deathLine:"you crack the radiator cap too soon and scalding coolant sprays straight into your face.\nYou have died.",
+          injureLine:"scalding steam catches your hand and forearm. It blisters badly."}},
+        {text:"the transmission slips into neutral on a hill", hazard:null},
+        {text:"the check engine light comes on and stays on", hazard:null}
+      ],
+      night:[
+        {text:"the headlights flicker and die on a pitch-black stretch of road", hazard:{deathChance:0.30, injureChance:0.25,
+          deathLine:"working blind by feel at the front bumper, a passing car doesn't see you in time.\nYou have died.",
+          injureLine:"a passing car's mirror clips you in the dark. Bruised badly, but you're alive."}},
+        {text:"the temperature gauge spikes in the dark", hazard:{deathChance:0.10, injureChance:0.25,
+          deathLine:"you open the radiator cap in the dark without checking the temperature first, and the scalding spray gets you.\nYou have died.",
+          injureLine:"hot coolant sprays across your hand. Painful, but survivable."}}
+      ]
+    },
+    desert: {
+      name:"stretch of desert highway",
+      day:[
+        {text:"the engine overheats badly in the heat", hazard:{deathChance:0.12, injureChance:0.25,
+          deathLine:"you crack the radiator cap in the blazing heat and the scalding spray hits you point-blank.\nYou have died.",
+          injureLine:"the radiator blows steam across your arm the moment you touch the cap."}},
+        {text:"a tire shreds itself on the scorching asphalt", hazard:{deathChance:0.35, injureChance:0.25,
+          deathLine:"crouched at the tire, hidden from view, an 18-wheeler clips the shoulder and doesn't see you in time.\nYou have died.",
+          injureLine:"a passing truck's mirror catches your shoulder as it roars by. Dislocated, but you're breathing."}},
+        {text:"sand clogs the air filter and the engine chokes", hazard:null}
+      ],
+      night:[
+        {text:"the radiator finally gives out after baking all day", hazard:{deathChance:0.12, injureChance:0.25,
+          deathLine:"you can't see the pressure gauge in the dark and the radiator cap blows scalding coolant into your face.\nYou have died.",
+          injureLine:"you get sprayed across the arm reaching in blind. It hurts, but you'll live."}},
+        {text:"the alternator dies out in the cold desert dark", hazard:{deathChance:0.20, injureChance:0.30,
+          deathLine:"you cross the battery terminals while working by feel, and it detonates in your hands.\nYou have died.",
+          injureLine:"the battery arcs and burns your hands badly."}}
+      ]
+    },
+    forest: {
+      name:"forest backroad",
+      day:[
+        {text:"a fallen branch punctures the oil pan", hazard:null},
+        {text:"the brakes start grinding ominously on the winding road", hazard:{deathChance:0.20, injureChance:0.30,
+          deathLine:"the car isn't properly blocked and it rolls off the jack, pinning you underneath.\nYou have died.",
+          injureLine:"the jack slips and the car comes down on your leg. Broken, but you're alive."}},
+        {text:"the AC compressor seizes with a horrible clunk", hazard:null}
+      ],
+      night:[
+        {text:"the headlights catch something moving and you swerve, blowing a tire", hazard:{deathChance:0.35, injureChance:0.25,
+          deathLine:"crouched changing the tire in the pitch dark, an 18-wheeler doesn't see you until it's too late.\nYou have died.",
+          injureLine:"you're knocked off your feet by a passing truck's draft. Battered, but alive."}},
+        {text:"the engine starts sputtering with no lights for miles", hazard:{deathChance:0.15, injureChance:0.25,
+          deathLine:"you drop a wrench into the fan while the engine's still turning over and it comes back at you.\nYou have died.",
+          injureLine:"the fan catches your sleeve and yanks your arm in before you can pull free."}}
+      ]
+    },
+    bridge: {
+      name:"bridge crossing",
+      day:[
+        {text:"a tire blows out right on the bridge deck", hazard:{deathChance:0.40, injureChance:0.25,
+          deathLine:"crouched at the tire with traffic roaring past on the narrow deck, an 18-wheeler clips you.\nYou have died.",
+          injureLine:"a passing truck's mirror clips your shoulder hard as it roars by. Dislocated, but you're alive."}},
+        {text:"the transmission slips as you climb the approach", hazard:null}
+      ],
+      night:[
+        {text:"the alternator dies, killing your headlights mid-span", hazard:{deathChance:0.25, injureChance:0.30,
+          deathLine:"you cross the battery terminals in the dark and it detonates in your hands.\nYou have died.",
+          injureLine:"the battery arcs and burns your hands badly."}},
+        {text:"a tire blows out and you can barely see to change it", hazard:{deathChance:0.45, injureChance:0.25,
+          deathLine:"unseen in the dark on the narrow bridge deck, an 18-wheeler doesn't see you until it's far too late.\nYou have died.",
+          injureLine:"you're clipped by a mirror and thrown against the railing. Battered, but breathing."}}
+      ]
+    },
+    rain: {
+      name:"rain-slicked shoulder",
+      day:[
+        {text:"the wipers seize and the windshield fogs solid", hazard:{deathChance:0.80, injureChance:0.20,
+          deathLine:"you're out in the open, wrench in hand, when lightning finds the tallest thing in the field \u2014 you.\nYou have died.",
+          injureLine:"lightning strikes nearby and the shock throws you flat. You wake up ringing all over, but alive \u2014 you'll feel this one for a long time."}},
+        {text:"the engine stalls in standing water", hazard:{deathChance:0.15, injureChance:0.30,
+          deathLine:"you short the starter while standing in ankle-deep water and the shock stops your heart.\nYou have died.",
+          injureLine:"electricity and standing water do not mix. You're thrown back, numb and shaking, but alive."}}
+      ],
+      night:[
+        {text:"you hydroplane onto the shoulder and the tire finally gives", hazard:{deathChance:0.40, injureChance:0.25,
+          deathLine:"crouched at the tire on the wet shoulder in the dark, a car doesn't see you until it's too late.\nYou have died.",
+          injureLine:"you're clipped and thrown into the ditch. Soaked and hurt, but alive."}},
+        {text:"the electrical system shorts out in the wet", hazard:{deathChance:0.45, injureChance:0.30,
+          deathLine:"you reach into the fuse box with wet hands and the short finds you instead.\nYou have died.",
+          injureLine:"the short arcs through you and throws you back onto the wet pavement. Your hands are burned, but you're alive."}}
+      ]
+    }
+  };
+
+  function handleBreakdown(night){
+    const wear = Math.floor(Math.random()*25)+15;
+    state.carHealth -= wear;
+    const locKeys = Object.keys(BREAKDOWN_LOCATIONS);
+    const locKey = pick(locKeys);
+    const loc = BREAKDOWN_LOCATIONS[locKey];
+    const problemObj = pick(night ? loc.night : loc.day);
+    const problem = problemObj.text;
+    if(checkDeadline()) return;
+
+    setScene('breakdown', {night:night, location:locKey});
+    state._lastLoc = locKey; state._lastNight = night; state._lastProblem = problemObj;
+
+    if(state.carHealth <= 0){
+      // very rare: the car is totaled beyond any roadside repair
+      if(Math.random() < 0.005){
+        totalCar(loc.name, problem, night);
+        return;
+      }
+      const towCost = Math.round(150 * state.repairMult);
+      const tiredNote = state.energy < 50 ? " You're running low on energy, which makes anything you try yourself riskier right now." : "";
+      render("Disaster, out on the " + loc.name + ": " + problem + ", and the " + state.car + " rolls to a dead stop" + (night ? " in the dark" : "") + "." + tiredNote);
+      showControls([
+        {label:"Call a tow to the shop (-$"+towCost+")", action:()=>payRepair(150, 55, 85)},
+        {label:"Fix it yourself (risky)", action:diyRepair},
+        {label:"Wait for a passer-by (free, slow)", action:waitForHelp}
+      ]);
+      return;
+    }
+    const patchCost = Math.round(40 * state.repairMult);
+    const tiredNote = state.energy < 50 ? " You're running low on energy, which makes anything you try yourself riskier right now." : "";
+    render("Trouble on the " + loc.name + ": " + problem + ". The " + state.car + " limps onward, worse for wear." + tiredNote);
+    showControls([
+      {label:"Patch it up (-$"+patchCost+")", action:()=>payRepair(40, 25, 45)},
+      {label:"Quick roadside fix (free, risky)", action:quickFix},
+      {label:"Push on anyway (risky)", action:pushOnAnyway}
+    ]);
+  }
+
+  function pushOnAnyway(){
+    const problemObj = state._lastProblem;
+    const problemTxt = problemObj ? problemObj.text : "whatever's wrong under the hood";
+    const severity = 1 - (state.carHealth/100); // worse car condition = worse odds
+    const fMult = fatigueRiskMult();
+    const deathChance = (0.05 + severity*0.12) * fMult;
+    const worsenChance = 0.35;
+
+    const roll = Math.random();
+    if(roll < deathChance){
+      const templates = [
+        "You decide it can wait. It couldn't \u2014 " + problemTxt + " finally gives out completely at highway speed, and you lose control.\nYou have died.",
+        "Ignoring " + problemTxt + " turns out to be the last mistake you make. The " + state.car + " goes off the road before you can react.\nYou have died.",
+        "You figure you'll deal with " + problemTxt + " later. There is no later \u2014 it fails catastrophically doing 70 down the highway.\nYou have died.",
+        "The neglected problem \u2014 " + problemTxt + " \u2014 picks the worst possible moment, on a blind curve, to finish the job.\nYou have died.",
+        "You white-knuckle it another few miles, convinced " + problemTxt + " can hold. It cannot.\nYou have died.",
+        "Somewhere between denial and the next exit, " + problemTxt + " stops being a warning and starts being the end.\nYou have died."
+      ];
+      finishDeath(pick(templates));
+      return;
+    }
+
+    if(roll < deathChance + worsenChance){
+      const extraWear = randInt(20,35);
+      state.carHealth = Math.max(0, state.carHealth - extraWear);
+      state.neglected = (state.neglected||0) + 1;
+      if(state.carHealth <= 0){
+        setScene('breakdown', {night:state._lastNight, location:state._lastLoc});
+        const towCost = Math.round(150 * state.repairMult);
+        render("You push on, and " + problemTxt + " gets its revenge \u2014 the " + state.car + " dies completely, right there on the road.");
+        showControls([
+          {label:"Call a tow to the shop (-$"+towCost+")", action:()=>payRepair(150, 55, 85)},
+          {label:"Fix it yourself (risky)", action:diyRepair},
+          {label:"Wait for a passer-by (free, slow)", action:waitForHelp}
+        ]);
+        return;
+      }
+      setScene('breakdown', {night:state._lastNight, location:state._lastLoc});
+      render("You push on, but ignoring " + problemTxt + " was a mistake \u2014 it gets noticeably worse (car at " + state.carHealth + "%).");
+      const patchCost = Math.round(40 * state.repairMult);
+      showControls([
+        {label:"Patch it up (-$"+patchCost+")", action:()=>payRepair(40, 25, 45)},
+        {label:"Quick roadside fix (free, risky)", action:quickFix},
+        {label:"Push on anyway (risky)", action:pushOnAnyway}
+      ]);
+      return;
+    }
+
+    state.neglected = (state.neglected||0) + 1;
+    render("You push on and get away with it \u2014 for now. Something still doesn't sound right under the hood.");
+    if(checkDeadline()) return;
+    setScene('road');
+    progressOrDrive();
+  }
+
+  function totalCar(locName, problem, night){
+    state.totaled = true;
+    setScene('breakdown', {night:night, location:state._lastLoc});
+    render("Catastrophe, out on the " + locName + ": " + problem + " turns into something much worse \u2014 a deep metallic bang, then silence. The " + state.car + " is done. Whatever just happened is going to cost more than the car is worth to fix.");
+    offerReplacementCar();
+  }
+
+  function offerReplacementCar(){
+    const affordable = CAR_CATALOG.filter(c => c.value <= state.cash).sort((a,b)=>a.value-b.value).slice(0,3);
+    const btns = affordable.map(c => ({
+      label: "Buy the " + c.name + " ($" + c.value + ")",
+      action: () => buyReplacementCar(c)
+    }));
+    btns.push({label:"Abandon it & take the bus the rest of the way", action: takeBus});
+    if(affordable.length === 0){
+      render(document.getElementById('textbox').textContent + "\n\nYou can't afford a replacement right now.");
+    }
+    showControls(btns);
+  }
+
+  function buyReplacementCar(c){
+    state.cash -= c.value;
+    state.car = c.name; state.reliability = c.reliability; state.repairMult = c.repairMult; state.carValue = c.value;
+    state.carHealth = 100; state.totaled = false;
+    advanceHours(3);
+    render("You hand over $" + c.value + " in cash at a roadside lot and drive off in a " + c.name + ". A downgrade from your plans, but it runs.");
+    if(checkDeadline()) return;
+    setScene('road');
+    progressOrDrive();
+  }
+
+  function takeBus(){
+    state.totaled = false;
+    advanceHours(Math.floor(Math.random()*10)+14);
+    state.miles = state.totalMiles;
+    state.car = "Greyhound bus";
+    if(checkDeadline()) return;
+    setScene('arrive');
+    state.arrived = true;
+    render("You leave the wreck behind, buy a ticket with what cash you have left, and ride the rest of the way by bus, watching the miles you used to drive go by out the window.");
+    showControls([]);
+    document.getElementById('resetBtn').classList.remove('hidden');
+  }
+
+  function fatigueRiskMult(){
+    // 1.0 at full energy, up to ~1.6x death/injury risk when running near empty
+    return 1 + Math.max(0, (50 - state.energy) / 50) * 0.6;
+  }
+
+  function quickFix(){
+    advanceHours(1);
+    const hz = state._lastProblem && state._lastProblem.hazard;
+    const fMult = fatigueRiskMult();
+    if(hz){
+      const dC = hz.deathChance * 0.35 * fMult, iC = hz.injureChance * 0.35 * fMult;
+      const roll = Math.random();
+      if(roll < dC){ finishDeath(hz.deathLine); return; }
+      if(roll < dC + iC){
+        applyInjury();
+        state.carHealth -= 10;
+        render(hz.injureLine + " The fix didn't take either \u2014 the " + state.car + " is worse off than before.");
+        if(checkDeadline()) return;
+      } else {
+        const gain = randInt(8,16);
+        state.carHealth = Math.min(100, state.carHealth + gain);
+        render("You jiggle, tighten, and curse at something under the hood until it stops making the noise. Free fix, for now (car at " + state.carHealth + "%).");
+      }
+    } else {
+      const roll = Math.random();
+      if(roll < (0.5 * state.reliability + 0.15) / fMult){
+        const gain = randInt(8,16);
+        state.carHealth = Math.min(100, state.carHealth + gain);
+        render("You jiggle, tighten, and curse at something under the hood until it stops making the noise. Free fix, for now (car at " + state.carHealth + "%).");
+      } else {
+        state.carHealth -= 15;
+        render("Your quick fix makes things worse. The " + state.car + " sounds even angrier than before.");
+      }
+    }
+    if(checkDeadline()) return;
+    if(state.carHealth <= 0){
+      if(Math.random() < 0.005){ totalCar(BREAKDOWN_LOCATIONS[state._lastLoc].name, "the engine finally gives up for good", state._lastNight); return; }
+      setScene('breakdown', {night:state._lastNight, location:state._lastLoc});
+      const towCost = Math.round(150 * state.repairMult);
+      render("The " + state.car + " gives out completely. It's not going anywhere on its own.");
+      showControls([
+        {label:"Call a tow to the shop (-$"+towCost+")", action:()=>payRepair(150, 55, 85)},
+        {label:"Fix it yourself (risky)", action:diyRepair},
+        {label:"Wait for a passer-by (free, slow)", action:waitForHelp}
+      ]);
+      return;
+    }
+    setScene('road');
+    progressOrDrive();
+  }
+
+  function waitForHelp(){
+    const hoursSpent = Math.floor(Math.random()*5)+5;
+    advanceHours(hoursSpent);
+    if(checkDeadline()) return;
+    setScene('repair', {phase: isNight(state.hour)?'night':(isDusk(state.hour)?'dusk':'day')});
+    const roll = Math.random();
+    if(roll < 0.7){
+      const gain = randInt(30,50);
+      state.carHealth = Math.min(100, state.carHealth + gain);
+      state.neglected = 0;
+      render("Eventually a passing rancher stops, tows you into a gravel-lot garage, and a mechanic patches you up for the cost of the story. It's not a full fix, but it runs (car at " + state.carHealth + "%). No charge, but you lost most of the day waiting.");
+    } else {
+      state.cash += Math.max(0, Math.floor(Math.random()*20));
+      const gain = randInt(15,30);
+      state.carHealth = Math.min(100, state.carHealth + gain);
+      state.neglected = 0;
+      render("A trucker stops, helps you limp the car into a gravel-lot garage, and even slips you a little gas money out of pity. Patched to " + state.carHealth + "%, but the wait cost you most of the day.");
+    }
+    if(checkDeadline()) return;
+    setScene('road');
+    progressOrDrive();
+  }
+
+  function payRepair(baseCost, restoreMin, restoreMax){
+    setScene('repair', {phase: isNight(state.hour)?'night':(isDusk(state.hour)?'dusk':'day')});
+    const actualCost = Math.round(baseCost * state.repairMult);
+    state.cash -= actualCost;
+    const gain = randInt(restoreMin, restoreMax);
+    state.carHealth = Math.min(100, state.carHealth + gain);
+    state.neglected = 0;
+    advanceHours(2);
+    const full = state.carHealth >= 100;
+    render("A mechanic in a gravel-lot garage works the " + state.car + " over for $" + actualCost + ". " +
+      (full ? "It comes out running like new." : "It's running again at " + state.carHealth + "% \u2014 the mechanic shrugs and says some of the wear just isn't worth chasing on a car like this."));
+    if(checkDeadline()) return;
+    setScene('road');
+    progressOrDrive();
+  }
+
+  function diyRepair(){
+    advanceHours(1);
+    const hz = state._lastProblem && state._lastProblem.hazard;
+    const towCost = Math.round(150 * state.repairMult);
+    const fMult = fatigueRiskMult();
+    if(hz){
+      const relBoost = (1 - state.reliability) * 0.3; // junkers are a bit more dangerous to DIY
+      const dC = Math.min(0.92, (hz.deathChance + relBoost) * fMult);
+      const iC = Math.min(0.95 - dC, hz.injureChance * fMult);
+      const roll = Math.random();
+      if(roll < dC){
+        finishDeath(hz.deathLine);
+        return;
+      }
+      if(roll < dC + iC){
+        applyInjury();
+        render(hz.injureLine + " The " + state.car + " is still dead in the water, and you're in worse shape than when you started.");
+        if(checkDeadline()) return;
+        showControls([
+          {label:"Call a tow to the shop (-$"+towCost+")", action:()=>payRepair(150, 55, 85)},
+          {label:"Try again anyway", action:diyRepair},
+          {label:"Wait for a passer-by (free, slow)", action:waitForHelp}
+        ]);
+        return;
+      }
+      const fix = randInt(30,55);
+      render("You work through it carefully, and this time nothing bites back. Car condition restored to " + fix + "%.");
+      state.carHealth = fix;
+      state.neglected = 0;
+      if(checkDeadline()) return;
+      setScene('road');
+      progressOrDrive();
+      return;
+    }
+    // fallback generic risk for problems with no scripted hazard
+    const roll = Math.random();
+    const deathChance = 0.10 * (0.6 + (1-state.reliability)) * fMult;
+    if(roll < deathChance){
+      const genericDiyDeaths = [
+        "working on the " + state.car + ", a spark plug shoots out of the engine\nand hits you in the head.\nYou have died.",
+        "the jack gives way while you're underneath, and the " + state.car + " comes down on top of you.\nYou have died.",
+        "a wrench slips, your hand follows it into the fan belt, and things go very wrong very fast.\nYou have died.",
+        "you lean too far over the running engine and your sleeve catches in something spinning.\nYou have died."
+      ];
+      finishDeath(pick(genericDiyDeaths));
+      return;
+    }
+    if(roll < deathChance + 0.35){
+      const fix = randInt(30,55);
+      render("You tinker under the hood with a wrench and blind optimism. Somehow, it works \u2014 sort of. Car condition restored to " + fix + "%.");
+      state.carHealth = fix;
+      state.neglected = 0;
+      if(checkDeadline()) return;
+      setScene('road');
+      progressOrDrive();
+    } else {
+      state.cash -= 20;
+      render("You make it worse. The " + state.car + " is still dead, and now there's a part left over that you're fairly sure mattered. -$20 wasted on tools.");
+      if(checkDeadline()) return;
+      showControls([
+        {label:"Call a tow to the shop (-$"+towCost+")", action:()=>payRepair(150, 55, 85)},
+        {label:"Try again", action:diyRepair},
+        {label:"Wait for a passer-by (free, slow)", action:waitForHelp}
+      ]);
+    }
+  }
+
+  document.getElementById('resetBtn').onclick = newGame;
+  newGame();
+})();
+</script>
+</body>
+</html>
